@@ -29,6 +29,7 @@ const Chat = () => {
           lastName: msg.senderId.lastName,
           text: msg.text,
           timestamp: msg.updatedAt,
+          isSeen: msg.isSeen,
         };
       });
       setMessages(chatMessages);
@@ -57,25 +58,46 @@ const Chat = () => {
       });
       return;
     }
-
+  
     const socket = createSocketConnection();
+    socketRef.current = socket; // 🔁 Assign FIRST
+  
     socket.emit("joinChat", {
       firstName: user?.firstName,
       userId,
       targetUserId,
     });
-
-    socket.on("messageRecived", ({ firstName, text }) => {
+  
+    socketRef.current.emit("markAsSeen", {
+      userId,
+      targetUserId,
+    });
+  
+    socket.on("messageRecived", ({ firstName, text, timestamp }) => {
       setMessages((prevMessages) => [
         ...prevMessages,
-        { firstName, text, timestamp: new Date().toISOString() },
+        {
+          firstName,
+          text,
+          timestamp: timestamp || new Date().toISOString(),
+          isSeen: false,
+        },
       ]);
     });
-
-    socketRef.current = socket;
-
+  
+    socket.on("messagesSeen", ({ by }) => {
+      if (by === targetUserId) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.firstName === user.firstName ? { ...msg, isSeen: true } : msg
+          )
+        );
+      }
+    });
+  
     return () => socket.disconnect();
   }, [userId, targetUserId]);
+  
 
   const sendMessage = () => {
     if (!message.trim() || !socketRef.current) return;
@@ -121,7 +143,14 @@ const Chat = () => {
                   {dayjs(msg.timestamp).format("hh:mm A")}
                 </time>
               </div>
-              <div className="chat-bubble">{msg.text}</div>
+              <div className="chat-bubble">
+                {msg.text}
+                {msg.firstName === user.firstName && (
+                  <div className="text-[10px] text-right mt-1 opacity-60">
+                    {msg.isSeen ? "✅" : "✔"}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>
