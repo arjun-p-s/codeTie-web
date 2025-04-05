@@ -27,6 +27,7 @@ const Chat = () => {
 
       const chatMessages = chat?.data?.messages.map((msg) => {
         return {
+          senderId: msg.senderId._id,
           firstName: msg.senderId.firstName,
           lastName: msg.senderId.lastName,
           text: msg.text,
@@ -75,10 +76,11 @@ const Chat = () => {
       targetUserId,
     });
 
-    socket.on("messageRecived", ({ firstName, text, timestamp }) => {
+    socket.on("messageRecived", ({ firstName, text, timestamp, senderId }) => {
       setMessages((prevMessages) => [
         ...prevMessages,
         {
+          senderId,
           firstName,
           text,
           timestamp: timestamp || new Date().toISOString(),
@@ -91,7 +93,7 @@ const Chat = () => {
       if (by === targetUserId) {
         setMessages((prev) =>
           prev.map((msg) =>
-            msg.firstName === user.firstName ? { ...msg, isSeen: true } : msg
+            msg.firstName === user.firstName? { ...msg, isSeen: true } : msg
           )
         );
       }
