@@ -5,6 +5,7 @@ import { useSelector } from "react-redux";
 import { BASE_URL } from "../utils/constants";
 import axios from "axios";
 import dayjs from "dayjs";
+import { Check, CheckCheck } from "lucide-react";
 
 const Chat = () => {
   const { targetUserId } = useParams();
@@ -58,21 +59,21 @@ const Chat = () => {
       });
       return;
     }
-  
+
     const socket = createSocketConnection();
-    socketRef.current = socket; // 🔁 Assign FIRST
-  
+    socketRef.current = socket; 
+
     socket.emit("joinChat", {
       firstName: user?.firstName,
       userId,
       targetUserId,
     });
-  
+
     socketRef.current.emit("markAsSeen", {
       userId,
       targetUserId,
     });
-  
+
     socket.on("messageRecived", ({ firstName, text, timestamp }) => {
       setMessages((prevMessages) => [
         ...prevMessages,
@@ -84,7 +85,7 @@ const Chat = () => {
         },
       ]);
     });
-  
+
     socket.on("messagesSeen", ({ by }) => {
       if (by === targetUserId) {
         setMessages((prev) =>
@@ -94,10 +95,9 @@ const Chat = () => {
         );
       }
     });
-  
+
     return () => socket.disconnect();
   }, [userId, targetUserId]);
-  
 
   const sendMessage = () => {
     if (!message.trim() || !socketRef.current) return;
@@ -146,8 +146,12 @@ const Chat = () => {
               <div className="chat-bubble">
                 {msg.text}
                 {msg.firstName === user.firstName && (
-                  <div className="text-[10px] text-right mt-1 opacity-60">
-                    {msg.isSeen ? "✅" : "✔"}
+                  <div className="text-[10px] text-right mt-1 flex justify-end items-center gap-1">
+                    {msg.isSeen ? (
+                      <CheckCheck size={12} className="text-blue-500" />
+                    ) : (
+                      <Check size={12} className="text-gray-400" />
+                    )}
                   </div>
                 )}
               </div>
