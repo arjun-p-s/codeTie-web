@@ -16,6 +16,7 @@ const Chat = () => {
   const [message, setMessage] = useState("");
   const [targetUser, setTargetUser] = useState(null);
   const socketRef = useRef(null);
+  const bottomRef = useRef(null);
 
   const fetchMessages = async () => {
     try {
@@ -61,7 +62,7 @@ const Chat = () => {
     }
 
     const socket = createSocketConnection();
-    socketRef.current = socket; 
+    socketRef.current = socket;
 
     socket.emit("joinChat", {
       firstName: user?.firstName,
@@ -98,6 +99,10 @@ const Chat = () => {
 
     return () => socket.disconnect();
   }, [userId, targetUserId]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const sendMessage = () => {
     if (!message.trim() || !socketRef.current) return;
@@ -157,6 +162,7 @@ const Chat = () => {
               </div>
             </div>
           ))}
+          <div ref={bottomRef}></div>
         </div>
 
         <div className="mt-4 flex">
