@@ -93,7 +93,7 @@ const Chat = () => {
       if (by === targetUserId) {
         setMessages((prev) =>
           prev.map((msg) =>
-            msg.firstName === user.firstName? { ...msg, isSeen: true } : msg
+            msg.firstName === user.firstName ? { ...msg, isSeen: true } : msg
           )
         );
       }
