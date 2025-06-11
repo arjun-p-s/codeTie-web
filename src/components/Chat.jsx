@@ -5,7 +5,7 @@ import { useSelector } from "react-redux";
 import { BASE_URL } from "../utils/constants";
 import axios from "axios";
 import dayjs from "dayjs";
-import { Check, CheckCheck } from "lucide-react";
+import { Check, CheckCheck, Video } from "lucide-react";
 
 const Chat = () => {
   const { targetUserId } = useParams();
@@ -125,8 +125,8 @@ const Chat = () => {
   return (
     <div className="flex justify-center">
       <div className="rounded-md p-5 m-10 border border-base-300 lg:w-1/2 w-full">
-        <div className="avatar flex items-center">
-          <div className="w-8 rounded-full">
+        <div className="avatar  flex items-center">
+          <div className="w-8 rounded-full overflow-hidden">
             <img src={targetUser?.userData?.photourl} alt="Avatar" />
           </div>
           <h1 className="mx-5 font-bold">
@@ -134,6 +134,7 @@ const Chat = () => {
               " " +
               targetUser?.userData?.lastName || "Loading..."}
           </h1>
+         <div className="justify-end"> <Video/></div> 
         </div>
 
         <div className="border-t border-base-300 h-96 overflow-y-auto p-4">

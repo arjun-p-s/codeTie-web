@@ -10,6 +10,7 @@ import Connections from "./components/Connections";
 import ConnectionRequest from "./components/ConnectionRequest";
 import Chat from "./components/Chat";
 import Demo from "./components/Demo";
+import VideoCallWrapper from "./components/VideoCallWrapper";
 
 function App() {
   return (
@@ -23,9 +24,10 @@ function App() {
               <Route path="/profile" element={<Profile />} />
               <Route path="/connections" element={<Connections />} />
               <Route path="/login" element={<Login />} />
-              <Route path="/demo" element={<Demo/>} />
+              <Route path="/demo" element={<Demo />} />
               <Route path="/requests" element={<ConnectionRequest />} />
               <Route path="/chat/:targetUserId" element={<Chat />} />
+              <Route path="/videoCall/:roomId" element={<VideoCallWrapper/>} />
             </Route>
           </Routes>
         </BrowserRouter>
