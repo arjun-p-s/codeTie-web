@@ -6,6 +6,7 @@ import { BASE_URL } from "../utils/constants";
 import axios from "axios";
 import dayjs from "dayjs";
 import { Check, CheckCheck, Video } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const Chat = () => {
   const { targetUserId } = useParams();
@@ -40,7 +41,12 @@ const Chat = () => {
       console.log(err.message);
     }
   };
+  const navigate = useNavigate();
 
+  const handleStartCall = () => {
+    const roomId = [userId, targetUserId].sort().join("_");
+    navigate(`/videoCall/${roomId}`);
+  };
   useEffect(() => {
     if (!targetUserId) return;
     fetchMessages();
@@ -134,7 +140,15 @@ const Chat = () => {
               " " +
               targetUser?.userData?.lastName || "Loading..."}
           </h1>
-         <div className="justify-end"> <Video/></div> 
+          <div className="justify-end">
+            {" "}
+            <button
+              onClick={handleStartCall}
+              className="ml-auto text-blue-600 hover:text-blue-800"
+            >
+              <Video size={20} />
+            </button>
+          </div>
         </div>
 
         <div className="border-t border-base-300 h-96 overflow-y-auto p-4">
