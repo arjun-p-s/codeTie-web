@@ -13,6 +13,8 @@ const Chat = () => {
   const user = useSelector((store) => store.user);
   const userId = user?._id;
 
+  const [incomingCall, setIncomingCall] = useState(null);
+
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState("");
   const [targetUser, setTargetUser] = useState(null);
@@ -45,8 +47,38 @@ const Chat = () => {
 
   const handleStartCall = () => {
     const roomId = [userId, targetUserId].sort().join("_");
-    navigate(`/videoCall/${roomId}`);
+
+    socketRef.current.emit("sendCallNotification", {
+      callerId: userId,
+      callerName: user?.firstName,
+      targetUserId,
+      callType: "video",
+      roomId,
+    });
+
+    const handleCallResponse = ({ response, roomId: responseRoom }) => {
+      if (responseRoom !== roomId) return;
+
+      if (response === "accepted") {
+        navigate(`/videoCall/${roomId}`, {
+          state: { isCaller: true },
+        });
+      } else if (response === "declined") {
+        alert("Call declined");
+      }
+
+      socketRef.current.off("callResponse", handleCallResponse);
+    };
+
+    socketRef.current.on("callResponse", handleCallResponse);
+
+    // ✅ NEW: Listen to failure
+    socketRef.current.once("callNotificationFailed", ({ reason }) => {
+      alert("Call failed: " + reason);
+      socketRef.current.off("callResponse", handleCallResponse); // Clean up
+    });
   };
+
   useEffect(() => {
     if (!targetUserId) return;
     fetchMessages();
@@ -71,17 +103,22 @@ const Chat = () => {
     const socket = createSocketConnection();
     socketRef.current = socket;
 
+    socket.emit("userOnline", { userId });
+
+    // Emit join event
     socket.emit("joinChat", {
       firstName: user?.firstName,
       userId,
       targetUserId,
     });
 
-    socketRef.current.emit("markAsSeen", {
+    // Mark messages seen
+    socket.emit("markAsSeen", {
       userId,
       targetUserId,
     });
 
+    // Handle message receiving
     socket.on("messageRecived", ({ firstName, text, timestamp, senderId }) => {
       setMessages((prevMessages) => [
         ...prevMessages,
@@ -95,6 +132,7 @@ const Chat = () => {
       ]);
     });
 
+    // Handle seen messages
     socket.on("messagesSeen", ({ by }) => {
       if (by === targetUserId) {
         setMessages((prev) =>
@@ -105,7 +143,14 @@ const Chat = () => {
       }
     });
 
-    return () => socket.disconnect();
+    // ✅ Incoming call listener should be here
+    socket.on("incomingCall", ({ callerName, callerId, callType, roomId }) => {
+      setIncomingCall({ callerName, callerId, roomId });
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, [userId, targetUserId]);
 
   useEffect(() => {
@@ -195,6 +240,45 @@ const Chat = () => {
           </button>
         </div>
       </div>
+
+      {incomingCall && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-5 rounded shadow-lg w-80">
+            <p className="text-center font-semibold text-lg">
+              {incomingCall.callerName} is calling you.
+            </p>
+            <div className="flex justify-center mt-4 gap-3">
+              <button
+                onClick={() => {
+                  socketRef.current.emit("respondToCall", {
+                    callerId: incomingCall.callerId,
+                    response: "accepted",
+                    roomId: incomingCall.roomId,
+                  });
+                  navigate(`/videoCall/${incomingCall.roomId}`);
+                  setIncomingCall(null);
+                }}
+                className="btn btn-success"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => {
+                  socketRef.current.emit("respondToCall", {
+                    callerId: incomingCall.callerId,
+                    response: "declined",
+                    roomId: incomingCall.roomId,
+                  });
+                  setIncomingCall(null);
+                }}
+                className="btn btn-error"
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,70 +1,105 @@
-import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
+import {
+  PhoneOff,
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  Volume2,
+  VolumeX,
+  MoreVertical,
+} from "lucide-react";
 import io from "socket.io-client";
 
-// Fix: Connect to your backend server, not frontend port
-const socket = io("http://localhost:5000"); // Change this to your backend server port
+const socket = io("http://localhost:5000");
 
 const VideoCall = () => {
   const { roomId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isCaller = location.state?.isCaller ?? false;
+
   const localRef = useRef(null);
   const remoteRef = useRef(null);
   const peerConnection = useRef(null);
   const localStream = useRef(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isCallStarted, setIsCallStarted] = useState(false);
-  const [isInitiator, setIsInitiator] = useState(false);
 
+  const [callAccepted, setCallAccepted] = useState(false);
+  const [callState, setCallState] = useState(isCaller ? "outgoing" : "active");
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+  const [callDuration, setCallDuration] = useState(0);
+
+  // Timer
   useEffect(() => {
-    console.log("🎥 VideoCall component mounted, room:", roomId);
+    let timer;
+    if (callState === "active") {
+      timer = setInterval(() => {
+        setCallDuration((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [callState]);
 
-    // Initialize everything
-    initializeVideoCall();
+  // Handle call response and setup
+  useEffect(() => {
+    if (!isCaller) {
+      init(); // Receiver initializes immediately
+    }
 
-    // Cleanup on unmount
+    socket.on("callResponse", ({ response, roomId: incomingRoomId }) => {
+      if (incomingRoomId === roomId && response === "accepted") {
+        setCallAccepted(true);
+      } else if (response === "declined") {
+        setCallState("ended");
+      }
+    });
+
     return () => {
       cleanup();
+      socket.off("callResponse");
     };
-  }, [roomId]);
+  }, []);
 
-  const initializeVideoCall = async () => {
+  useEffect(() => {
+    if (isCaller && callAccepted) {
+      init(); // Caller waits until call is accepted
+    }
+  }, [callAccepted]);
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
+  };
+
+  const init = async () => {
     try {
-      // 1. Get user media first
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       });
 
-      console.log("📹 Got local stream");
-      if (localRef.current) {
-        localRef.current.srcObject = stream;
-      }
+      localRef.current.srcObject = stream;
       localStream.current = stream;
 
-      // 2. Create peer connection
       createPeerConnection();
-
-      // 3. Add local stream to peer connection
       stream.getTracks().forEach((track) => {
         peerConnection.current.addTrack(track, stream);
-        console.log("➕ Added track to peer connection");
       });
 
-      // 4. Setup socket listeners BEFORE joining room
-      setupSocketListeners();
-
-      // 5. Join the room
+      setupSocketEvents();
       socket.emit("joinVideoRoom", { roomId });
-      setIsConnected(true);
-
     } catch (error) {
-      console.error("❌ Error initializing video call:", error);
+      console.error("Media error:", error);
     }
   };
 
   const createPeerConnection = () => {
-    console.log("🔗 Creating peer connection");
-
     peerConnection.current = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -72,233 +107,197 @@ const VideoCall = () => {
       ],
     });
 
-    // Handle ICE candidates
-    peerConnection.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log("📤 Sending ICE candidate");
-        socket.emit("ice-candidate", {
-          candidate: event.candidate,
-          roomId,
-        });
+    peerConnection.current.onicecandidate = (e) => {
+      if (e.candidate) {
+        socket.emit("ice-candidate", { candidate: e.candidate, roomId });
       }
     };
 
-    // Handle remote stream
-    peerConnection.current.ontrack = (event) => {
-      console.log("🎥 Received remote stream");
-      if (remoteRef.current && event.streams[0]) {
-        remoteRef.current.srcObject = event.streams[0];
-        setIsCallStarted(true);
+    peerConnection.current.ontrack = (e) => {
+      if (remoteRef.current && e.streams[0]) {
+        remoteRef.current.srcObject = e.streams[0];
+        setCallState("active");
       }
-    };
-
-    // Handle connection state changes
-    peerConnection.current.onconnectionstatechange = () => {
-      console.log(
-        "🔗 Connection state:",
-        peerConnection.current.connectionState
-      );
-    };
-
-    peerConnection.current.oniceconnectionstatechange = () => {
-      console.log(
-        "🧊 ICE connection state:",
-        peerConnection.current.iceConnectionState
-      );
     };
   };
 
-  const setupSocketListeners = () => {
-    // When there are other users already in room
-    socket.on("other-user-in-room", async (data) => {
-      console.log("👥 Other users already in room:", data.numUsers);
-      setIsInitiator(true);
-      // Wait a bit for everything to be ready
-      setTimeout(() => {
-        createOffer();
-      }, 1000);
+  const setupSocketEvents = () => {
+    socket.on("other-user-in-room", () => {
+      createAndSendOffer();
     });
 
-    // When a new user joins (we're already in room)
-    socket.on("user-joined-video", async (data) => {
-      console.log("👤 New user joined video room:", data.userId);
-      if (!isInitiator) {
-        setIsInitiator(true);
-        // Wait a bit for the other user to be ready
-        setTimeout(() => {
-          createOffer();
-        }, 1000);
+    socket.on("user-joined-video", () => {
+      createAndSendOffer();
+    });
+
+    socket.on("video-offer", async ({ offer }) => {
+      await peerConnection.current.setRemoteDescription(
+        new RTCSessionDescription(offer)
+      );
+      const answer = await peerConnection.current.createAnswer();
+      await peerConnection.current.setLocalDescription(answer);
+      socket.emit("video-answer", { answer, roomId });
+    });
+
+    socket.on("video-answer", async ({ answer }) => {
+      await peerConnection.current.setRemoteDescription(
+        new RTCSessionDescription(answer)
+      );
+    });
+
+    socket.on("ice-candidate", async ({ candidate }) => {
+      if (peerConnection.current.remoteDescription) {
+        await peerConnection.current.addIceCandidate(
+          new RTCIceCandidate(candidate)
+        );
       }
     });
 
-    // Receive video offer
-    socket.on("video-offer", async ({ offer, from }) => {
-      console.log("📥 Received offer from:", from);
-
-      try {
-        if (peerConnection.current.signalingState === "stable") {
-          await peerConnection.current.setRemoteDescription(
-            new RTCSessionDescription(offer)
-          );
-          
-          const answer = await peerConnection.current.createAnswer();
-          await peerConnection.current.setLocalDescription(answer);
-
-          socket.emit("video-answer", { answer, roomId });
-          console.log("📤 Sent answer");
-        }
-      } catch (error) {
-        console.error("❌ Error handling offer:", error);
-      }
-    });
-
-    // Receive video answer
-    socket.on("video-answer", async ({ answer, from }) => {
-      console.log("📥 Received answer from:", from);
-
-      try {
-        if (peerConnection.current.signalingState === "have-local-offer") {
-          await peerConnection.current.setRemoteDescription(
-            new RTCSessionDescription(answer)
-          );
-          console.log("✅ Set remote description from answer");
-        }
-      } catch (error) {
-        console.error("❌ Error handling answer:", error);
-      }
-    });
-
-    // Receive ICE candidates
-    socket.on("ice-candidate", async ({ candidate, from }) => {
-      console.log("📥 Received ICE candidate from:", from);
-
-      try {
-        if (peerConnection.current && 
-            peerConnection.current.remoteDescription && 
-            candidate) {
-          await peerConnection.current.addIceCandidate(
-            new RTCIceCandidate(candidate)
-          );
-          console.log("✅ Added ICE candidate");
-        }
-      } catch (error) {
-        console.error("❌ Error adding ICE candidate:", error);
-      }
-    });
-
-    // Handle user leaving
-    socket.on("user-left-video", ({ userId }) => {
-      console.log("👋 User left:", userId);
-      if (remoteRef.current) {
-        remoteRef.current.srcObject = null;
-      }
-      setIsCallStarted(false);
-      setIsInitiator(false);
+    socket.on("user-left-video", () => {
+      setCallState("ended");
     });
   };
 
-  const createOffer = async () => {
-    try {
-      if (peerConnection.current.signalingState === "stable") {
-        console.log("📤 Creating offer");
-        const offer = await peerConnection.current.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-        });
-        await peerConnection.current.setLocalDescription(offer);
-        socket.emit("video-offer", { offer, roomId });
-        console.log("📤 Sent offer");
-      }
-    } catch (error) {
-      console.error("❌ Error creating offer:", error);
-    }
+  const createAndSendOffer = async () => {
+    const offer = await peerConnection.current.createOffer();
+    await peerConnection.current.setLocalDescription(offer);
+    socket.emit("video-offer", { offer, roomId });
   };
 
   const cleanup = () => {
-    console.log("🧹 Cleaning up video call");
-
-    // Stop local stream
-    if (localStream.current) {
-      localStream.current.getTracks().forEach((track) => {
-        track.stop();
-      });
-    }
-
-    // Close peer connection
-    if (peerConnection.current) {
-      peerConnection.current.close();
-    }
-
-    // Leave room
     socket.emit("leaveVideoRoom", { roomId });
-
-    // Remove socket listeners
-    socket.off("other-user-in-room");
-    socket.off("user-joined-video");
     socket.off("video-offer");
     socket.off("video-answer");
     socket.off("ice-candidate");
     socket.off("user-left-video");
+
+    if (localStream.current) {
+      localStream.current.getTracks().forEach((track) => track.stop());
+    }
+
+    if (peerConnection.current) {
+      peerConnection.current.close();
+    }
   };
 
   const endCall = () => {
-    cleanup();
-    // Navigate back or handle end call logic
-    window.history.back();
+    setCallState("ended");
+    setTimeout(() => navigate(-1), 2000);
   };
 
-  return (
-    <div className="h-screen bg-black flex flex-col p-5">
-      <div className="flex justify-between items-center mb-5 text-white">
-        <h2 className="text-xl font-bold">Video Call - Room: {roomId}</h2>
-        <div className="flex items-center gap-4">
-          <span className="text-sm">
-            Status:{" "}
-            {isConnected
-              ? isCallStarted
-                ? "🟢 Connected"
-                : "🟡 Waiting..."
-              : "🔴 Connecting..."}
-          </span>
+  if (callState === "outgoing") {
+    return (
+      <div className="h-screen bg-gradient-to-br from-green-600 to-green-800 flex flex-col justify-center items-center text-white relative">
+        <div className="absolute inset-0 bg-black/20"></div>
+        <div className="relative z-10 text-center">
+          <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center mb-4">
+            <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+              U
+            </div>
+          </div>
+          <h2 className="text-2xl font-semibold mb-2">Calling user...</h2>
+          <p className="text-green-100 mb-8">Room: {roomId}</p>
           <button
             onClick={endCall}
-            className="bg-red-600 hover:bg-red-700 text-white border-none rounded px-5 py-2 cursor-pointer transition-colors"
+            className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
           >
-            End Call
+            <PhoneOff size={24} />
           </button>
         </div>
       </div>
+    );
+  }
 
-      <div className="flex flex-1 gap-5">
-        {/* Local Video */}
-        <div className="flex-1 relative bg-gray-800 rounded-lg overflow-hidden">
-          <video
-            ref={localRef}
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute bottom-2 left-2 text-white bg-black bg-opacity-70 px-2 py-1 rounded text-sm">
-            You
+  if (callState === "active") {
+    return (
+      <div className="w-full h-screen bg-black flex flex-col">
+        <div className="p-4 text-white flex justify-between bg-black/70">
+          <div className="flex items-center space-x-4">
+            <MoreVertical />
+            <div>
+              <div className="text-sm">{formatTime(callDuration)}</div>
+              <div className="text-xs text-gray-400">Encrypted</div>
+            </div>
           </div>
+          <div className="text-sm">Room: {roomId?.slice(-6)}</div>
         </div>
 
-        {/* Remote Video */}
-        <div className="flex-1 relative bg-gray-800 rounded-lg overflow-hidden">
+        <div className="flex-1 relative">
           <video
             ref={remoteRef}
             autoPlay
             playsInline
             className="w-full h-full object-cover"
           />
-          <div className="absolute bottom-2 left-2 text-white bg-black bg-opacity-70 px-2 py-1 rounded text-sm">
-            {isCallStarted ? "Remote User" : "Waiting for user..."}
+
+          <div className="absolute top-6 right-6 w-32 h-44 bg-gray-900 border-white/20 border-2 rounded-xl overflow-hidden shadow-lg">
+            <video
+              ref={localRef}
+              autoPlay
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+            />
           </div>
         </div>
+
+        <div className="p-6 bg-black/70 flex justify-center space-x-4 text-white">
+          <button
+            onClick={() => setIsMuted(!isMuted)}
+            className={`w-12 h-12 rounded-full ${
+              isMuted ? "bg-red-500" : "bg-white/20"
+            } flex items-center justify-center`}
+          >
+            {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+          </button>
+          <button
+            onClick={() => setIsVideoOff(!isVideoOff)}
+            className={`w-12 h-12 rounded-full ${
+              isVideoOff ? "bg-red-500" : "bg-white/20"
+            } flex items-center justify-center`}
+          >
+            {isVideoOff ? <VideoOff size={20} /> : <Video size={20} />}
+          </button>
+          <button
+            onClick={endCall}
+            className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center"
+          >
+            <PhoneOff size={20} />
+          </button>
+          <button
+            onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+            className={`w-12 h-12 rounded-full ${
+              !isSpeakerOn ? "bg-red-500" : "bg-white/20"
+            } flex items-center justify-center`}
+          >
+            {isSpeakerOn ? <Volume2 size={20} /> : <VolumeX size={20} />}
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (callState === "ended") {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center text-white bg-gradient-to-br from-gray-700 to-gray-900">
+        <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center mb-4">
+          <PhoneOff size={32} />
+        </div>
+        <h2 className="text-xl font-semibold mb-2">Call Ended</h2>
+        <p className="text-gray-300 mb-4">
+          Duration: {formatTime(callDuration)}
+        </p>
+        <button
+          onClick={() => navigate(-1)}
+          className="px-6 py-2 bg-green-500 rounded-full hover:bg-green-600"
+        >
+          Back
+        </button>
+      </div>
+    );
+  }
+
+  return null;
 };
 
 export default VideoCall;
