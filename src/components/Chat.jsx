@@ -20,6 +20,7 @@ const Chat = () => {
   const [targetUser, setTargetUser] = useState(null);
   const socketRef = useRef(null);
   const bottomRef = useRef(null);
+  const finalRoomId = [userId, targetUserId].sort().join("_");
 
   const fetchMessages = async () => {
     try {
@@ -46,38 +47,50 @@ const Chat = () => {
   const navigate = useNavigate();
 
   const handleStartCall = () => {
-    const roomId = [userId, targetUserId].sort().join("_");
+  const roomId = [userId, targetUserId].sort().join("_");
 
-    socketRef.current.emit("sendCallNotification", {
-      callerId: userId,
-      callerName: user?.firstName,
-      targetUserId,
-      callType: "video",
-      roomId,
-    });
+  socketRef.current.emit("sendCallNotification", {
+    callerId: userId,
+    callerName: user?.firstName,
+    targetUserId,
+    callType: "video",
+    roomId,
+  });
 
-    const handleCallResponse = ({ response, roomId: responseRoom }) => {
-      if (responseRoom !== roomId) return;
+  const handleCallResponse = ({ response, roomId: responseRoomId }) => {
+    // Make sure we're handling the right room response
+    if (responseRoomId !== roomId) {
+      console.warn("Received callResponse for unmatched room:", responseRoomId);
+      return;
+    }
 
-      if (response === "accepted") {
-        navigate(`/videoCall/${roomId}`, {
-          state: { isCaller: true },
-        });
-      } else if (response === "declined") {
-        alert("Call declined");
-      }
+    console.log("Call response received:", response, "for room:", responseRoomId);
 
-      socketRef.current.off("callResponse", handleCallResponse);
-    };
+    if (response === "accepted") {
+      // Navigate to video call with caller state
+      navigate(`/videoCall/${roomId}`, {
+        state: { isCaller: false },
+      });
+    } else if (response === "declined") {
+      alert("Call declined");
+    }
 
-    socketRef.current.on("callResponse", handleCallResponse);
-
-    // ✅ NEW: Listen to failure
-    socketRef.current.once("callNotificationFailed", ({ reason }) => {
-      alert("Call failed: " + reason);
-      socketRef.current.off("callResponse", handleCallResponse); // Clean up
-    });
+    // Clean up listeners
+    socketRef.current.off("callResponse", handleCallResponse);
+    socketRef.current.off("callNotificationFailed", handleCallFailed);
   };
+
+  const handleCallFailed = ({ reason }) => {
+    alert("Call failed: " + reason);
+    // Clean up listeners
+    socketRef.current.off("callResponse", handleCallResponse);
+    socketRef.current.off("callNotificationFailed", handleCallFailed);
+  };
+
+  // Set up listeners
+  socketRef.current.once("callResponse", handleCallResponse);
+  socketRef.current.once("callNotificationFailed", handleCallFailed);
+};
 
   useEffect(() => {
     if (!targetUserId) return;
